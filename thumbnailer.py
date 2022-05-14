@@ -16,6 +16,7 @@ import os
 import sys
 import random
 import re
+import json
 
 import pygsheets
 import configparser
@@ -161,9 +162,19 @@ class Thumbnailer (Gimp.PlugIn):
             print('Processing Remaining Edits')
             for functionName in [key for key in episode.keys() if key not in self.__priorityEdits]:
                 if '_'+functionName in dir(self):
-                    getattr(self, '_'+functionName)(episodeParams)
+                    retVal = getattr(self, '_'+functionName)(episodeParams)
+                    if retVal:  #recording any metadata from functions that have randomness
+                        episodeParams['override_'+functionName] = retVal
                 elif functionName not in self.__requiredFields:
-                     print('\t[Skip] '+functionName+' assumed data variable.')
+                    print('\t[Skip] '+functionName+' assumed data variable.')
+
+            print('Gathering overwrites, to record in sheet...')
+            overrides = { item[0]: item[1] for item in episodeParams.items() if (item[0].startswith('override') and item[1] != '') }
+            cell = self.MAIN_WORKSHEET.cell('N'+episodeParams['local_row'])
+            if episodeParams['use_raw'] == 'TRUE':
+                overrides['use_raw'] = True
+                overrides['raw_sub_text'] = episodeParams['sub_text']
+            cell.value = json.dumps(overrides)
 
             # finalize thumbnail to layer
             print('[Done] Finalizing Thumbnail\n')
@@ -185,7 +196,7 @@ class Thumbnailer (Gimp.PlugIn):
         thumbsToBuild = []
         for row in thumbRows:
             if row[0] != '' and row[0] != 'VideoID':
-                thumbsToBuild.append({ x.lower(): y for (x,y) in zip(headers, row)})
+                thumbsToBuild.append({ x.lower(): y for (x,y) in zip(headers, row) if y != ''})
 
         return thumbsToBuild
 
@@ -355,8 +366,8 @@ class Thumbnailer (Gimp.PlugIn):
     def _reaction(self, params):
         print('\t[Edit] Face Type: '+str(params['reaction']))
 
-        self.usedFaces += [ self._randomizeFace(params['reaction'],
-                                                repeat=self.usedFaces[-self.__repeatAllowance:]) ]
+        faceUsed = self._randomizeFace(params['reaction'], repeat=self.usedFaces[-self.__repeatAllowance:])
+        self.usedFaces += [faceUsed]
 
         # Dynamic based on user input
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))  
@@ -381,6 +392,8 @@ class Thumbnailer (Gimp.PlugIn):
         self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
 
         self.__image.get_selection().none(self.__image)
+
+        return faceUsed.get_name()
 
     @staticmethod
     def _allChildren(parent):
@@ -417,7 +430,7 @@ class Thumbnailer (Gimp.PlugIn):
         color = Gimp.RGB()
         rgb = tuple(int(hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
         color.set(float(rgb[0])/255.0, float(rgb[1])/255.0, float(rgb[2])/255.0)
-        print('Color: ('+str(color.r)+','+str(color.g)+','+str(color.b)+')')
+        # print('Color: ('+str(color.r)+','+str(color.g)+','+str(color.b)+')')
         return color
 
 Gimp.main(Thumbnailer.__gtype__, sys.argv)
