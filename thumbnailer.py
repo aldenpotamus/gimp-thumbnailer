@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+#Batch move commands &"<path_to_gimp>\bin\gimp-2.99.exe" -i -b '(gimp-xcf-load 1 \"<path_to_template>\")' -b '(plug-in-thumbnailer-python 1 (car (gimp-get-images)))' -b '(gimp-quit TRUE)'
+
 import gi
 gi.require_version('Gimp', '3.0')
 from gi.repository import Gimp
@@ -78,50 +80,13 @@ class Thumbnailer (Gimp.PlugIn):
 
         return [ "plug-in-thumbnailer-python" ]
 
-    def do_create_procedure(self, name):
-        procedure = Gimp.ImageProcedure.new(self, name,
-                                       Gimp.PDBProcType.PLUGIN,
-                                       self.run, None)
-
-        procedure.set_image_types("*")
-        procedure.set_sensitivity_mask (Gimp.ProcedureSensitivityMask.DRAWABLE)
-
-        procedure.set_menu_label(N_("Generate Thumbnails"))
-        procedure.set_icon_name(GimpUi.ICON_GEGL)
-        procedure.add_menu_path('<Image>/Filters/Development/Thumbnailer/')
-
-        procedure.set_documentation(N_("Thumbnailer: Template + Google sheet = Thumbnail"),
-                                    N_("Thumbnailer: Template + Google sheet = Thumbnail"),
-                                    name)
-        procedure.set_attribution("Alden Roberts", "Alden Roberts", "2022")
-
-        return procedure
-
-    def run(self, procedure, run_mode, image, n_drawables, drawables, args, run_data):
-        self.__image = image
-
-        print('Collecting layer references...')
-        for layerName in self.__layers.keys():
-            self.__layers[layerName]['layer'] = self.__image.get_layer_by_name(layerName)
-            print(self.__layers[layerName]['layer'])
-        self.__layers['faces_default'] = { 'generated': False,
-                                           'layer':  self.__image.get_layer_by_name(self.CONFIG['IMAGE']['facesLayer']) }
-
-        if None in self.__layers:
-            print('Missing required layers: '+str([(x, self.__layers[x]['layer']) for x in self.__layers.keys() if not self.__layers[x]['layer']])+'\n')
-
-        thumbs = self.getDataFromSheet()
-        self.generateThumbnails(thumbs)
-
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
-
     def generateThumbnails(self, thumbs):
         self.__numErrors = 0
         self.__numWarnings = 0
 
         for episode in thumbs:
             # image prep
-            print('Processing for '+episode['videoid'])
+            print('Processing for '+episode['filename'])
 
             # Set defaults for non-required fields
             episodeParams = { 'fill_size': 2 }
@@ -164,17 +129,29 @@ class Thumbnailer (Gimp.PlugIn):
                 if '_'+functionName in dir(self):
                     retVal = getattr(self, '_'+functionName)(episodeParams)
                     if retVal:  #recording any metadata from functions that have randomness
-                        episodeParams['override_'+functionName] = retVal
+                        episodeParams['!'+functionName] = retVal
                 elif functionName not in self.__requiredFields:
                     print('\t[Skip] '+functionName+' assumed data variable.')
 
             print('Gathering overwrites, to record in sheet...')
-            overrides = { item[0]: item[1] for item in episodeParams.items() if (item[0].startswith('override') and item[1] != '') }
-            cell = self.MAIN_WORKSHEET.cell('N'+episodeParams['local_row'])
+            overrides = { item[0]: item[1] for item in episodeParams.items() if (item[0].startswith('!') and item[1] != '') }
             if episodeParams['use_raw'] == 'TRUE':
-                overrides['use_raw'] = True
+                overrides['use_raw'] = 'TRUE'
                 overrides['raw_sub_text'] = episodeParams['sub_text']
-            cell.value = json.dumps(overrides)
+
+            print('Updating core fields on main worksheet...')
+            self.MAIN_WORKSHEET.update_values('A'+str(episodeParams['local_row'])+':O'+str(episodeParams['local_row']),
+                                [[
+                                    None, None, None, None, #Handling Checkboxes
+                                    None, #Date
+                                    episodeParams['game'] if 'game' in episodeParams.keys() else '', 
+                                    episodeParams['title'] if 'title' in episodeParams.keys() else '',
+                                    episodeParams['episode_number'] if 'episode_number' in episodeParams.keys() else '',
+                                    episodeParams['sub_text_raw'] if 'sub_text_raw' in episodeParams.keys() else '',
+                                    episodeParams['reaction'] if 'reaction' in episodeParams.keys() else '',
+                                    None, None, None, None,
+                                    json.dumps(overrides)
+                                ]])
 
             # finalize thumbnail to layer
             print('[Done] Finalizing Thumbnail\n')
@@ -190,12 +167,12 @@ class Thumbnailer (Gimp.PlugIn):
     def getDataFromSheet(self):
         print('Pulling thumbs from sheet...')
 
-        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AF3', returnas='matrix')[0]
-        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AF50', returnas='matrix')
+        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AK3', returnas='matrix')[0]
+        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AK50', returnas='matrix')
 
         thumbsToBuild = []
         for row in thumbRows:
-            if row[0] != '' and row[0] != 'VideoID':
+            if row[0] != '' and row[0] != 'Filename':
                 thumbsToBuild.append({ x.lower(): y for (x,y) in zip(headers, row) if y != ''})
 
         return thumbsToBuild
@@ -261,7 +238,7 @@ class Thumbnailer (Gimp.PlugIn):
 
         # Gimp.file_save(new_image, layer, self.CONFIG['GENERAL']['outputDir']+re.sub(r'[><:"/|?*]',
         #                                                '', params['filename'])+'.png', '?')
-        outputPath = self.CONFIG['GENERAL']['outputDir']+params['videoid']+'.png'    
+        outputPath = self.CONFIG['GENERAL']['outputDir']+params['filename']+'.png'    
         file = Gio.File.new_for_path(outputPath)
         Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, new_image, [layer], file)
         new_image.delete()
@@ -278,19 +255,20 @@ class Thumbnailer (Gimp.PlugIn):
     # Adders
     def _game(self, params):
         print('\t[Edit] Setting game background to: '+params['game'])
+        gameBackground = params['!bg'] if '!bg' in params.keys() else params['game']
 
         backgroundExists = False
         children = self.__layers['Games']['layer'].get_children()
 
         for layer in children:
-            if layer.get_name() == params['game']:
+            if layer.get_name() == gameBackground:
                 layer.set_visible(True)
                 backgroundExists = True
             else:
                 layer.set_visible(False)
 
         if not backgroundExists:
-            print("No layer found that matches the game: "+str(params['game']))
+            print("No layer found that matches the game: "+str(gameBackground))
             self.__numErrors += 1
 
     def _episode_number(self, params):
@@ -343,14 +321,14 @@ class Thumbnailer (Gimp.PlugIn):
 
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['sub_font_color']))
         textLayer = Gimp.text_fontname(self.__image,
-                                           self.__layers['sub_text']['layer'],
-                                           x2 + bufferSize + params['sub_x_offset'],
-                                           params['sub_y_offset'],
-                                           params['sub_text'],
-                                           0,
-                                           True,
-                                           params['sub_font_size'], 0,
-                                           params['font'])
+                                       self.__layers['sub_text']['layer'],
+                                       x2 + bufferSize + params['sub_x_offset'],
+                                       params['sub_y_offset'],
+                                       params['sub_text'],
+                                       0,
+                                       True,
+                                       params['sub_font_size'], 0,
+                                       params['sub_font'])
         Gimp.floating_sel_anchor(textLayer)
 
   
@@ -432,5 +410,42 @@ class Thumbnailer (Gimp.PlugIn):
         color.set(float(rgb[0])/255.0, float(rgb[1])/255.0, float(rgb[2])/255.0)
         # print('Color: ('+str(color.r)+','+str(color.g)+','+str(color.b)+')')
         return color
+
+    def do_create_procedure(self, name):
+        procedure = Gimp.ImageProcedure.new(self, name,
+                                            Gimp.PDBProcType.PLUGIN,
+                                            self.run, None)
+
+        procedure.set_image_types("*")
+        procedure.set_sensitivity_mask (Gimp.ProcedureSensitivityMask.DRAWABLE)
+
+        procedure.set_menu_label(N_("Generate Thumbnails"))
+        procedure.set_icon_name(GimpUi.ICON_GEGL)
+        procedure.add_menu_path('<Image>/Filters/Development/Thumbnailer/')
+
+        procedure.set_documentation(N_("Thumbnailer: Template + Google sheet = Thumbnail"),
+                                    N_("Thumbnailer: Template + Google sheet = Thumbnail"),
+                                    name)
+        procedure.set_attribution("Alden Roberts", "Alden Roberts", "2022")
+
+        return procedure
+
+    def run(self, procedure, run_mode, image, n_drawables, drawables, args, run_data):
+        self.__image = image
+
+        print('Collecting layer references...')
+        for layerName in self.__layers.keys():
+            self.__layers[layerName]['layer'] = self.__image.get_layer_by_name(layerName)
+            print(self.__layers[layerName]['layer'])
+        self.__layers['faces_default'] = { 'generated': False,
+                                           'layer':  self.__image.get_layer_by_name(self.CONFIG['IMAGE']['facesLayer']) }
+
+        if None in self.__layers:
+            print('Missing required layers: '+str([(x, self.__layers[x]['layer']) for x in self.__layers.keys() if not self.__layers[x]['layer']])+'\n')
+
+        thumbs = self.getDataFromSheet()
+        self.generateThumbnails(thumbs)
+
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 Gimp.main(Thumbnailer.__gtype__, sys.argv)
