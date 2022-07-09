@@ -64,12 +64,15 @@ class Thumbnailer (Gimp.PlugIn):
         self.__repeatAllowance = repeatAllowance
 
         self.__layers = { 'border':                 { 'generated': True,  'layer': None },
+                          'head_border':            { 'generated': True,  'layer': None },
                           'episode_number':         { 'generated': True,  'layer': None },
                           'episode_number_outline': { 'generated': True,  'layer': None },
                           'sub_text':               { 'generated': True,  'layer': None },
                           'sub_text_outline':       { 'generated': True,  'layer': None },
                           'Games':                  { 'generated': False, 'layer': None },
                           faceDefault:              { 'generated': False, 'layer': None } }
+
+        self.__strokeBrush = '2. Hardness 100'
 
     ## GimpPlugIn virtual methods ##
     def do_query_procedures(self):
@@ -167,8 +170,8 @@ class Thumbnailer (Gimp.PlugIn):
     def getDataFromSheet(self):
         print('Pulling thumbs from sheet...')
 
-        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AK3', returnas='matrix')[0]
-        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AK50', returnas='matrix')
+        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AL3', returnas='matrix')[0]
+        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AL50', returnas='matrix')
 
         thumbsToBuild = []
         for row in thumbRows:
@@ -231,6 +234,21 @@ class Thumbnailer (Gimp.PlugIn):
         toUse.set_visible(True)
 
         return toUse
+
+    def _specificFace(self, specificFaceName):
+        specificLayer = self.__image.get_layer_by_name(specificFaceName)
+
+        numChildren, clearLayers = Thumbnailer._allChildren(self.__layers['faces_default']['layer'])
+
+        for layer in clearLayers:
+            if layer.is_group():
+                 layer.set_visible(True)
+            else:
+                 layer.set_visible(False)
+
+        specificLayer.set_visible(True)
+
+        return specificLayer
 
     def _exportImage(self, params):
         new_image = self.__image.duplicate()
@@ -344,7 +362,12 @@ class Thumbnailer (Gimp.PlugIn):
     def _reaction(self, params):
         print('\t[Edit] Face Type: '+str(params['reaction']))
 
-        faceUsed = self._randomizeFace(params['reaction'], repeat=self.usedFaces[-self.__repeatAllowance:])
+        if '!reaction' not in params.keys():
+            print('\t\tChoosing random face from: '+str(params['reaction']))
+            faceUsed = self._randomizeFace(params['reaction'], repeat=self.usedFaces[-self.__repeatAllowance:])
+        else:
+            print('\t\tSpecific face requested, using: '+str(params['!reaction']))
+            faceUsed = self._specificFace(params['!reaction'])
         self.usedFaces += [faceUsed]
 
         # Dynamic based on user input
@@ -358,10 +381,34 @@ class Thumbnailer (Gimp.PlugIn):
         Gimp.context_set_sample_transparent(True)
 
         #Face Outline
-        self.__image.select_contiguous_color(2, self.__layers['faces_default']['layer'], 10, 10)
-        self.__image.get_selection().grow(self.__image, 10)
-        self.__image.get_selection().border(self.__image, 20)
-        self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
+        # self.__image.select_contiguous_color(2, self.__layers['faces_default']['layer'], 10, 10)
+        # self.__image.get_selection().grow(self.__image, 10)
+        # self.__image.get_selection().border(self.__image, 20)
+        # self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
+        Gimp.context_set_brush_size(10.0)
+        Gimp.context_set_brush_hardness(1.0)
+        Gimp.context_set_brush_force(1.0)
+        Gimp.context_set_sample_threshold(0.7)
+        Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
+        
+        # self.__image.select_contiguous_color(2, self.__layers['faces_default']['layer'], 10, 10)
+        color = Gimp.RGB()
+        color.set(0.0, 0.0, 0.0)
+        color.set_alpha(1.0)
+        
+        self.__image.select_color(2, self.__layers['faces_default']['layer'], color)
+        self.__image.get_selection().invert(self.__image)
+        self.__image.get_selection().grow(self.__image, 2)
+        Gimp.context_swap_colors()
+        Gimp.context_set_line_width(100)
+        self.__layers['head_border']['layer'].edit_stroke_selection()
+        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
+                                                        self.__image,
+                                                        self.__layers['head_border']['layer'],
+                                                        4.0,
+                                                        4.0,
+                                                        0])
+        Gimp.context_swap_colors()
 
         #Frame Outline
         self.__image.get_selection().all(self.__image)
