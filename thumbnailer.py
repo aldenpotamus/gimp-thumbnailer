@@ -37,7 +37,7 @@ _ = gettext.gettext
 def N_(message): return message
 
 class Thumbnailer (Gimp.PlugIn):
-    def __init__(self, repeatAllowance=5, faceDefault='Faces', usedFaces=[]):
+    def __init__(self, repeatAllowance=10, faceDefault='Faces', usedFaces=[]):
         print('Parsing config file...')
         self.CONFIG = configparser.ConfigParser()
         self.CONFIG.read('thumbnailer.ini')
@@ -309,6 +309,9 @@ class Thumbnailer (Gimp.PlugIn):
                                        params['font'])
 
 
+        Gimp.context_set_sample_threshold(0.7)
+        Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
+
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
         Gimp.floating_sel_anchor(textLayer)
         Gimp.context_set_feather(True)
@@ -316,8 +319,22 @@ class Thumbnailer (Gimp.PlugIn):
         self.__image.select_contiguous_color(2, self.__layers['episode_number']['layer'], 10, 10)
         self.__image.get_selection().invert(self.__image)
         self.__image.get_selection().grow(self.__image, 10)
+        
+        Gimp.context_set_sample_threshold(0)
+        Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
 
         self.__layers['episode_number_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+
+        Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
+                                                                  self.__image, self.__layers['episode_number_outline']['layer'],
+                                                                  0])
+
+        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
+                                                        self.__image,
+                                                        self.__layers['episode_number_outline']['layer'],
+                                                        2.0,
+                                                        2.0,
+                                                        0])
 
     def _sub_text(self, params):
         print('\t[Edit] Sub Number: '+str(params['sub_text']))
@@ -348,15 +365,32 @@ class Thumbnailer (Gimp.PlugIn):
                                        params['sub_font_size'], 0,
                                        params['sub_font'])
         Gimp.floating_sel_anchor(textLayer)
-
   
+        Gimp.context_set_sample_threshold(0.7)
+        Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
+        
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
         Gimp.context_set_feather(True)
         Gimp.context_set_feather_radius(2, 2)
         self.__image.select_contiguous_color(2, self.__layers['sub_text']['layer'], 10, 10)
         self.__image.get_selection().invert(self.__image)
         self.__image.get_selection().grow(self.__image, 10)
+        
+        Gimp.context_set_sample_threshold(0)
+        Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
+        
         self.__layers['sub_text_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+
+        Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
+                                                                  self.__image, self.__layers['episode_number_outline']['layer'],
+                                                                  0])
+
+        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
+                                                        self.__image,
+                                                        self.__layers['episode_number_outline']['layer'],
+                                                        2.0,
+                                                        2.0,
+                                                        0])
 
 
     def _reaction(self, params):
@@ -381,25 +415,23 @@ class Thumbnailer (Gimp.PlugIn):
         Gimp.context_set_sample_transparent(True)
 
         #Face Outline
-        # self.__image.select_contiguous_color(2, self.__layers['faces_default']['layer'], 10, 10)
-        # self.__image.get_selection().grow(self.__image, 10)
-        # self.__image.get_selection().border(self.__image, 20)
-        # self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
         Gimp.context_set_brush_size(10.0)
         Gimp.context_set_brush_hardness(1.0)
         Gimp.context_set_brush_force(1.0)
         Gimp.context_set_sample_threshold(0.7)
         Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
         
-        # self.__image.select_contiguous_color(2, self.__layers['faces_default']['layer'], 10, 10)
         color = Gimp.RGB()
         color.set(0.0, 0.0, 0.0)
         color.set_alpha(1.0)
-        
+
         self.__image.select_color(2, self.__layers['faces_default']['layer'], color)
         self.__image.get_selection().invert(self.__image)
         self.__image.get_selection().grow(self.__image, 2)
-        Gimp.context_swap_colors()
+        # Gimp.context_swap_colors()
+        
+        Gimp.context_set_foreground(Thumbnailer._parseHex("#FFFFFF"))  
+        
         Gimp.context_set_line_width(100)
         self.__layers['head_border']['layer'].edit_stroke_selection()
         Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
@@ -408,13 +440,25 @@ class Thumbnailer (Gimp.PlugIn):
                                                         4.0,
                                                         4.0,
                                                         0])
-        Gimp.context_swap_colors()
+       
+        Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))  
+        # Gimp.context_swap_colors()
+
+        Gimp.context_set_sample_threshold(0)
+        Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
 
         #Frame Outline
         self.__image.get_selection().all(self.__image)
         self.__image.get_selection().shrink(self.__image, 25)
         self.__image.get_selection().invert(self.__image)
         self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
+
+        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
+                                                self.__image,
+                                                self.__layers['border']['layer'],
+                                                16.0,
+                                                16.0,
+                                                0])
 
         self.__image.get_selection().none(self.__image)
 
