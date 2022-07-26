@@ -382,12 +382,12 @@ class Thumbnailer (Gimp.PlugIn):
         self.__layers['sub_text_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
 
         Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
-                                                                  self.__image, self.__layers['episode_number_outline']['layer'],
+                                                                  self.__image, self.__layers['sub_text_outline']['layer'],
                                                                   0])
 
         Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
                                                         self.__image,
-                                                        self.__layers['episode_number_outline']['layer'],
+                                                        self.__layers['sub_text_outline']['layer'],
                                                         2.0,
                                                         2.0,
                                                         0])
