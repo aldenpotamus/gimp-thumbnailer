@@ -143,10 +143,11 @@ class Thumbnailer (Gimp.PlugIn):
                 overrides['raw_sub_text'] = episodeParams['sub_text']
 
             print('Updating core fields on main worksheet...')
-            self.MAIN_WORKSHEET.update_values('A'+str(episodeParams['local_row'])+':O'+str(episodeParams['local_row']),
+            self.MAIN_WORKSHEET.update_values('A'+str(episodeParams['local_row'])+':P'+str(episodeParams['local_row']),
                                 [[
                                     None, None, None, None, #Handling Checkboxes
                                     None, #Date
+                                    None, #Time
                                     episodeParams['game'] if 'game' in episodeParams.keys() else '', 
                                     episodeParams['title'] if 'title' in episodeParams.keys() else '',
                                     episodeParams['episode_number'] if 'episode_number' in episodeParams.keys() else '',
