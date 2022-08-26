@@ -254,9 +254,11 @@ class Thumbnailer (Gimp.PlugIn):
     def _exportImage(self, params):
         new_image = self.__image.duplicate()
         layer = new_image.merge_visible_layers(Gimp.MergeType.CLIP_TO_IMAGE)
+        
+        # scale image => INTERPOLATION-NOHALO (3)
+        Gimp.context_set_interpolation(3)
+        new_image.scale(1280, 720)
 
-        # Gimp.file_save(new_image, layer, self.CONFIG['GENERAL']['outputDir']+re.sub(r'[><:"/|?*]',
-        #                                                '', params['filename'])+'.png', '?')
         outputPath = self.CONFIG['GENERAL']['outputDir']+params['filename']+'.png'    
         file = Gio.File.new_for_path(outputPath)
         Gimp.file_save(Gimp.RunMode.NONINTERACTIVE, new_image, [layer], file)
