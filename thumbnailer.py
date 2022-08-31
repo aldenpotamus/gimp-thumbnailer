@@ -76,11 +76,6 @@ class Thumbnailer (Gimp.PlugIn):
 
     ## GimpPlugIn virtual methods ##
     def do_query_procedures(self):
-        # Localization for the menu entries. It has to be called in the
-        # query function only.
-        self.set_translation_domain(textdomain,
-                                    Gio.file_new_for_path(Gimp.locale_directory()))
-
         return [ "plug-in-thumbnailer-python" ]
 
     def generateThumbnails(self, thumbs):
@@ -279,7 +274,7 @@ class Thumbnailer (Gimp.PlugIn):
         gameBackground = params['!bg'] if '!bg' in params.keys() else params['game']
 
         backgroundExists = False
-        children = self.__layers['Games']['layer'].get_children()
+        children = self.__layers['Games']['layer'].list_children()
 
         for layer in children:
             if layer.get_name() == gameBackground:
@@ -477,7 +472,7 @@ class Thumbnailer (Gimp.PlugIn):
     def _allChildrenHelper(parent):
         result = []
         
-        children = parent.get_children()
+        children = parent.list_children()
         for child in children:
             if child.is_group():
                 result += Thumbnailer._allChildrenHelper(child)
