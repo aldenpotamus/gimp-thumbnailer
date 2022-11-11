@@ -298,7 +298,11 @@ class Thumbnailer (Gimp.PlugIn):
         # Toggle off all feature layers
         bgFeatures = {}
         defaultValues = {}
-        for child in backgroundLayer.list_children():
+        for child in Thumbnailer._allChildren(backgroundLayer)[1]:
+            if child.is_group():
+                child.set_visible(True)
+                continue
+
             featureLayer = self.featureParser.match(child.get_name())
             
             if not featureLayer:
@@ -343,7 +347,7 @@ class Thumbnailer (Gimp.PlugIn):
                     print(f'\t\t\t\t Feature Name [{featureName}] not in Feature [{featureCat}]... using default.')
                     featureSelected = 'default'
                 else:
-                    print(f'\t\t\t\t Activating Feature Name [{featureName}] not in Feature [{featureCat}].')
+                    print(f'\t\t\t\t Activating Feature Name [{featureName}] in Feature [{featureCat}].')
                     featureSelected = featureName
                 
                 chosenFeatures.append(f'{featureCat}:{featureSelected}')
@@ -355,9 +359,12 @@ class Thumbnailer (Gimp.PlugIn):
         
         for remainingFeatureCat in featureCatsToProcess:
             print(f'\t\t\t Feature [{remainingFeatureCat}] not specificied in spreadsheet... using default.')
-            chosenFeatures.append(f'{remainingFeatureCat}:{defaultValues[remainingFeatureCat]}')
-            for layer in bgFeatures[remainingFeatureCat]['default']:
-                layer.set_visible(True)
+            if 'default' in bgFeatures[remainingFeatureCat]:
+                chosenFeatures.append(f'{remainingFeatureCat}:{defaultValues[remainingFeatureCat]}')
+                for layer in bgFeatures[remainingFeatureCat]['default']:
+                    layer.set_visible(True)
+            else:
+                print(f'\t\t\t\t No default avaialbe for {remainingFeatureCat}... skipping.')
             
         params['!features'] = ','.join(chosenFeatures)
 
@@ -552,9 +559,8 @@ class Thumbnailer (Gimp.PlugIn):
         for child in children:
             if child.is_group():
                 result += Thumbnailer._allChildrenHelper(child)
-            else:
-                result += [child]
-                
+            result += [child]
+
         return result
     
     @staticmethod
