@@ -44,10 +44,10 @@ class Thumbnailer (Gimp.PlugIn):
 
         print('Connecting to gSheets...')
         gc = pygsheets.authorize(service_file=self.CONFIG['AUTHENTICATION']['serviceToken'])
-        self.SHEET = gc.open_by_key(self.CONFIG['SHEET']['id'])
+        self.SHEET = gc.open_by_key(self.CONFIG['GENERAL']['spreadsheetId'])
 
-        self.MAIN_WORKSHEET = self.SHEET.worksheet_by_title(self.CONFIG['SHEET']['main'])
-        self.THUMB_WORKSHEET = self.SHEET.worksheet_by_title(self.CONFIG['SHEET']['thumbnails'])
+        self.MAIN_WORKSHEET = self.SHEET.worksheet_by_title(self.CONFIG['SHEETS']['main'])
+        self.THUMB_WORKSHEET = self.SHEET.worksheet_by_title(self.CONFIG['SHEETS']['thumbnails'])
 
         print('Initializing Thumbnail Builder')
 
@@ -73,6 +73,8 @@ class Thumbnailer (Gimp.PlugIn):
                           faceDefault:              { 'generated': False, 'layer': None } }
 
         self.__strokeBrush = '2. Hardness 100'
+
+        self.featureParser = re.compile(r'__(?P<type>D|F):(?P<cat>[^_]+)__(?P<name>[^|]+)')
 
     ## GimpPlugIn virtual methods ##
     def do_query_procedures(self):
@@ -138,7 +140,7 @@ class Thumbnailer (Gimp.PlugIn):
                 overrides['raw_sub_text'] = episodeParams['sub_text']
 
             print('Updating core fields on main worksheet...')
-            self.MAIN_WORKSHEET.update_values('A'+str(episodeParams['local_row'])+':P'+str(episodeParams['local_row']),
+            self.MAIN_WORKSHEET.update_values('A'+str(episodeParams['local_row'])+':R'+str(episodeParams['local_row']),
                                 [[
                                     None, None, None, None, #Handling Checkboxes
                                     None, #Date
@@ -166,8 +168,8 @@ class Thumbnailer (Gimp.PlugIn):
     def getDataFromSheet(self):
         print('Pulling thumbs from sheet...')
 
-        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AL3', returnas='matrix')[0]
-        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AL50', returnas='matrix')
+        headers = self.THUMB_WORKSHEET.get_values(start='A3', end='AN3', returnas='matrix')[0]
+        thumbRows = self.THUMB_WORKSHEET.get_values(start='A5', end='AN50', returnas='matrix')
 
         thumbsToBuild = []
         for row in thumbRows:
@@ -280,12 +282,86 @@ class Thumbnailer (Gimp.PlugIn):
             if layer.get_name() == gameBackground:
                 layer.set_visible(True)
                 backgroundExists = True
+                background = layer
             else:
                 layer.set_visible(False)
 
         if not backgroundExists:
             print("No layer found that matches the game: "+str(gameBackground))
             self.__numErrors += 1
+        else:
+            self._feature_helper(params, background)
+
+    def _feature_helper(self, params, backgroundLayer):        
+        print('\t\t[Edit] Applying features to background...')
+        
+        # Toggle off all feature layers
+        bgFeatures = {}
+        defaultValues = {}
+        for child in backgroundLayer.list_children():
+            featureLayer = self.featureParser.match(child.get_name())
+            
+            if not featureLayer:
+                continue
+
+            featureType = featureLayer.group('type')
+            featureCat = featureLayer.group('cat')
+            featureName = featureLayer.group('name')
+
+            if featureType:
+                if featureCat not in bgFeatures:
+                    bgFeatures[featureCat] = {}
+
+                if featureName not in bgFeatures[featureCat]:
+                    bgFeatures[featureCat][featureName] = []
+
+                bgFeatures[featureCat][featureName].append(child)
+                child.set_visible(False)
+                if featureType == 'D':
+                    defaultValues[featureCat] = featureName
+                    if 'default' not in bgFeatures[featureCat]:
+                        bgFeatures[featureCat]['default'] = []
+
+                    bgFeatures[featureCat]['default'].append(child)
+
+        # Toggle on selected features [default, random, specific]
+        chosenFeatures = []
+        featureCatsToProcess = { k for k in bgFeatures.keys() }
+        if 'features' in params:
+            for feature in params['features'].split(','):
+                featureCat, featureName = feature.split(':')
+                featureSelected = None
+
+                print(f'\t\t\t Feature: [{featureCat}] settings to [{featureName}]')
+                if featureCat not in bgFeatures:
+                    print(f'\t\t\t\t Feature {featureCat} not in Gimp File...')
+                    continue
+                elif featureName == 'random':
+                    featureSelected = random.choice([fn for fn in bgFeatures[featureCat].keys() if fn != 'default'])
+                    print(f'\t\t\t\t Using random Feature Name for Feature [{featureSelected}]')
+                elif featureName not in bgFeatures[featureCat]:
+                    print(f'\t\t\t\t Feature Name [{featureName}] not in Feature [{featureCat}]... using default.')
+                    featureSelected = 'default'
+                else:
+                    print(f'\t\t\t\t Activating Feature Name [{featureName}] not in Feature [{featureCat}].')
+                    featureSelected = featureName
+                
+                chosenFeatures.append(f'{featureCat}:{featureSelected}')
+                for layer in bgFeatures[featureCat][featureSelected]:
+                    layer.set_visible(True)
+
+                if featureCat in featureCatsToProcess:
+                    featureCatsToProcess.remove(featureCat)
+        
+        for remainingFeatureCat in featureCatsToProcess:
+            print(f'\t\t\t Feature [{remainingFeatureCat}] not specificied in spreadsheet... using default.')
+            chosenFeatures.append(f'{remainingFeatureCat}:{defaultValues[remainingFeatureCat]}')
+            for layer in bgFeatures[remainingFeatureCat]['default']:
+                layer.set_visible(True)
+            
+        params['!features'] = ','.join(chosenFeatures)
+
+        return
 
     def _episode_number(self, params):
         print('\t[Edit] Episode Number: '+str(params['episode_number']))
