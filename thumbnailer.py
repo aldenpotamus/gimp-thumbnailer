@@ -23,7 +23,7 @@ import json
 import pygsheets
 import configparser
 
-sys.stderr = open('C:/temp/python-fu-output.txt','a')
+sys.stderr = open('C:/log/python-fu-output.txt','a')
 sys.stdout=sys.stderr # So that they both go to the same file
 
 # Set-up localization for your plug-in with your own text domain.
@@ -103,17 +103,25 @@ class Thumbnailer (Gimp.PlugIn):
                 continue
 
             # Parse Complex Fields
-            episodeParams['font'] = episodeParams['font_data'].split(',')[0]
-            episodeParams['font_color'] = episodeParams['font_data'].split(',')[1]
-            episodeParams['font_size'] = int(episodeParams['font_data'].split(',')[2])
-            episodeParams['font_x_offset'] = int(episodeParams['font_data'].split(',')[3])
-            episodeParams['font_y_offset'] = int(episodeParams['font_data'].split(',')[4])
+            episodeParams['font'] = episodeParams['font_data'].split('|')[0]
+            episodeParams['font_color'] = episodeParams['font_data'].split('|')[1]
+            episodeParams['font_size'] = int(episodeParams['font_data'].split('|')[2])
+            episodeParams['font_x_offset'] = int(episodeParams['font_data'].split('|')[3])
+            episodeParams['font_y_offset'] = int(episodeParams['font_data'].split('|')[4])
 
-            episodeParams['sub_font'] = episodeParams['sub_font_data'].split(',')[0]
-            episodeParams['sub_font_color'] = episodeParams['sub_font_data'].split(',')[1]
-            episodeParams['sub_font_size'] = int(episodeParams['sub_font_data'].split(',')[2])
-            episodeParams['sub_x_offset'] = int(episodeParams['sub_font_data'].split(',')[3])
-            episodeParams['sub_y_offset'] = int(episodeParams['sub_font_data'].split(',')[4])
+            episodeParams['sub_font'] = episodeParams['sub_font_data'].split('|')[0]
+            episodeParams['sub_font_color'] = episodeParams['sub_font_data'].split('|')[1]
+            
+            if '~' in episodeParams['sub_font_data'].split('|')[2]:
+                episodeParams['sub_font_size'] = int(episodeParams['sub_font_data'].split('|')[2].split('~')[0])
+                episodeParams['sub_line_spacing'] = int(episodeParams['sub_font_data'].split('|')[2].split('~')[1])           
+            else:
+                episodeParams['sub_font_size'] = int(episodeParams['sub_font_data'].split('|')[2])
+                episodeParams['sub_line_spacing'] = 0
+            
+            
+            episodeParams['sub_x_offset'] = int(episodeParams['sub_font_data'].split('|')[3])
+            episodeParams['sub_y_offset'] = int(episodeParams['sub_font_data'].split('|')[4])
 
             # Priority Functions
             print('Processing Priority Edits')
@@ -371,60 +379,105 @@ class Thumbnailer (Gimp.PlugIn):
         return
 
     def _episode_number(self, params):
+        if params['font_color'] == "FALSE" or params['bg_color'] == "FALSE":
+            print('\t[Edit] Episode Number Listed as Transparent: Skipping...')
+            return
+
         print('\t[Edit] Episode Number: '+str(params['episode_number']))
 
+        self.__layers['episode_number']['layer'].resize_to_image_size()
         Gimp.context_set_antialias(True)
         Gimp.context_set_sample_merged(False)
         Gimp.context_set_sample_transparent(True)
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['font_color']))
         Gimp.context_set_background(Thumbnailer._parseHex(params['bg_color']))
 
-        textLayer = Gimp.text_fontname(self.__image,
+        fonts = Gimp.fonts_get_by_name(params['font'])
+        textLayer = Gimp.text_font(self.__image,
                                        self.__layers['episode_number']['layer'],
                                        params['font_x_offset'],
                                        params['font_y_offset'],
                                        params['episode_num_pretty'] ,
                                        0,
                                        True,
-                                       params['font_size'], 0,
-                                       params['font'])
-
-
-        Gimp.context_set_sample_threshold(0.7)
-        Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
-
-        Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
-        Gimp.floating_sel_anchor(textLayer)
-        Gimp.context_set_feather(True)
-        Gimp.context_set_feather_radius(2, 2)
-        self.__image.select_contiguous_color(2, self.__layers['episode_number']['layer'], 10, 10)
-        self.__image.get_selection().invert(self.__image)
-        self.__image.get_selection().grow(self.__image, 10)
+                                       params['font_size'],
+                                       fonts[0])
         
-        Gimp.context_set_sample_threshold(0)
-        Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
+        Gimp.floating_sel_anchor(textLayer)
+     
+        self.__layers['episode_number_outline']['layer'].resize_to_image_size()
 
-        self.__layers['episode_number_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+        if params['fg_color'] == "SHADOW":
+            print("\t\tBackground set as SHADOW, adding drop shadow instead...")
+            color = Gegl.Color()
+            color.set_rgba(0.0, 0.0, 0.0, 0.0)
 
-        Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
-                                                                  self.__image, self.__layers['episode_number_outline']['layer'],
-                                                                  0])
+            self.__image.select_color(2, self.__layers['episode_number']['layer'], color)
+            self.__image.get_selection().invert(self.__image)
+            Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
+            
+            self.__layers['episode_number_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+            self.__image.get_selection().none(self.__image)
+            self.__layers['episode_number_outline']['layer'].transform_2d(0,0, # Source
+                                                                    1,1, # Scale
+                                                                    0,   # Angle
+                                                                    3,3) # Dest
+            
+            procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+            config = procedure.create_config()
+            config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+            config.set_property('image', self.__image)
+            config.set_property('drawable', self.__layers['episode_number_outline']['layer'])
+            config.set_property('horizontal', 5.0)
+            config.set_property('vertical', 5.0)
+            config.set_property('method', 0)
+            procedure.run(config)
+        else:
+            Gimp.context_set_sample_threshold(0.7)
+            Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
 
-        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
-                                                        self.__image,
-                                                        self.__layers['episode_number_outline']['layer'],
-                                                        2.0,
-                                                        2.0,
-                                                        0])
+            Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
+            Gimp.context_set_feather(True)
+            Gimp.context_set_feather_radius(2, 2)
+            self.__image.select_contiguous_color(2, self.__layers['episode_number']['layer'], 10, 10)
+            self.__image.get_selection().invert(self.__image)
+            self.__image.get_selection().grow(self.__image, 10)
+            
+            Gimp.context_set_sample_threshold(0)
+            Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
+
+            self.__layers['episode_number_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+
+            self.__layers['episode_number_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+            self.__image.get_selection().none(self.__image)
+
+            procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+            config = procedure.create_config()
+            config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+            config.set_property('image', self.__image)
+            config.set_property('drawable', self.__layers['episode_number_outline']['layer'])
+            config.set_property('horizontal', 5.0)
+            config.set_property('vertical', 5.0)
+            config.set_property('method', 0)
+            procedure.run(config)
 
     def _sub_text(self, params):
+        if params['sub_font_color'] == "FALSE" or params['bg_color'] == "FALSE":
+            print('\t[Edit] Sub Number Listed as Transparent: Skipping...')
+            return
+        
         print('\t[Edit] Sub Number: '+str(params['sub_text']))
+
+        self.__layers['sub_text']['layer'].resize_to_image_size()
 
         Gimp.context_set_antialias(True)
         Gimp.context_set_sample_merged(False)
         Gimp.context_set_sample_transparent(True)
+        # Gimp.context_set_diagonal_neighbors(False)
+        # Gimp.context_set_feather(False)
+        # Gimp.context_set_sample_criterion(10)
 
-        Gimp.context_set_foreground(Thumbnailer._parseHex(params['font_color']))
+        Gimp.context_set_foreground(Thumbnailer._parseHex(params['sub_font_color']))
         Gimp.context_set_background(Thumbnailer._parseHex(params['bg_color']))
 
         # Place subtext down and right of main episode
@@ -432,47 +485,87 @@ class Thumbnailer (Gimp.PlugIn):
         self.__image.get_selection().invert(self.__image)
         thing, non_empty, x1, y1, x2, y2 = self.__image.get_selection().bounds(self.__image)
 
-        fontSize = params['sub_font_size']
+        # This is the value that occures when there is no episode number found
+        if x2 == 1497:
+            x2 = 0
+
         bufferSize = 30
 
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['sub_font_color']))
-        textLayer = Gimp.text_fontname(self.__image,
+        fonts = Gimp.fonts_get_by_name(params['sub_font'])
+        textLayer = Gimp.text_font(self.__image,
                                        self.__layers['sub_text']['layer'],
                                        x2 + bufferSize + params['sub_x_offset'],
                                        params['sub_y_offset'],
                                        params['sub_text'],
                                        0,
                                        True,
-                                       params['sub_font_size'], 0,
-                                       params['sub_font'])
+                                       params['sub_font_size'],
+                                       fonts[0])
+        textLayer = Gimp.TextLayer.get_by_id(textLayer.get_id())
+        textLayer.set_line_spacing(params['sub_line_spacing'])
+        
         Gimp.floating_sel_anchor(textLayer)
-  
-        Gimp.context_set_sample_threshold(0.7)
-        Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
-        
-        Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
-        Gimp.context_set_feather(True)
-        Gimp.context_set_feather_radius(2, 2)
-        self.__image.select_contiguous_color(2, self.__layers['sub_text']['layer'], 10, 10)
-        self.__image.get_selection().invert(self.__image)
-        self.__image.get_selection().grow(self.__image, 10)
-        
-        Gimp.context_set_sample_threshold(0)
-        Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
-        
-        self.__layers['sub_text_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
 
-        Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
-                                                                  self.__image, self.__layers['sub_text_outline']['layer'],
-                                                                  0])
+        self.__layers['sub_text_outline']['layer'].resize_to_image_size()
 
-        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
-                                                        self.__image,
-                                                        self.__layers['sub_text_outline']['layer'],
-                                                        2.0,
-                                                        2.0,
-                                                        0])
+        if params['fg_color'] == "SHADOW":
+            print("\t\tBackground set as SHADOW, adding drop shadow instead...")
+            
+            color = Gegl.Color()
+            color.set_rgba(0.0, 0.0, 0.0, 0.0)
 
+            self.__image.select_color(2, self.__layers['sub_text']['layer'], color)
+            self.__image.get_selection().invert(self.__image)
+            Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
+            
+            self.__layers['sub_text_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+            self.__image.get_selection().none(self.__image)
+            self.__layers['sub_text_outline']['layer'].transform_2d(0,0, # Source
+                                                                    1,1, # Scale
+                                                                    0,   # Angle
+                                                                    3,3) # Dest
+            
+            procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+            config = procedure.create_config()
+            config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+            config.set_property('image', self.__image)
+            config.set_property('drawable', self.__layers['sub_text_outline']['layer'])
+            config.set_property('horizontal', 5.0)
+            config.set_property('vertical', 5.0)
+            config.set_property('method', 0)
+            procedure.run(config)
+            
+        else:
+            Gimp.context_set_sample_threshold(0.7)
+            Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
+            
+            Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))
+            Gimp.context_set_feather(True)
+            Gimp.context_set_feather_radius(2, 2)
+            self.__image.select_contiguous_color(2, self.__layers['sub_text']['layer'], 10, 10)
+            self.__image.get_selection().invert(self.__image)
+            self.__image.get_selection().grow(self.__image, 10)
+            
+            Gimp.context_set_sample_threshold(0)
+            Gimp.context_set_sample_criterion(0) #SELECT-CRITERION-COMPOSITE
+            
+            self.__layers['sub_text_outline']['layer'].edit_fill(Gimp.FillType.FOREGROUND)
+
+            Gimp.get_pdb().run_procedure('plug-in-threshold-alpha', [ Gimp.RunMode.INTERACTIVE, 
+                                                                    self.__image, self.__layers['sub_text_outline']['layer'],
+                                                                    0])
+
+            procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+            config = procedure.create_config()
+            config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+            config.set_property('image', self.__image)
+            config.set_property('drawable', self.__layers['sub_text_outline']['layer'])
+            config.set_property('horizontal', 2.0)
+            config.set_property('vertical', 2.0)
+            config.set_property('method', 0)
+            procedure.run(config)
+            
 
     def _reaction(self, params):
         print('\t[Edit] Face Type: '+str(params['reaction']))
@@ -502,9 +595,8 @@ class Thumbnailer (Gimp.PlugIn):
         Gimp.context_set_sample_threshold(0.7)
         Gimp.context_set_sample_criterion(10) #SELECT-CRITERION-ALPHA
         
-        color = Gimp.RGB()
-        color.set(0.0, 0.0, 0.0)
-        color.set_alpha(1.0)
+        color = Gegl.Color()
+        color.set_rgba(0.0, 0.0, 0.0, 1.0)
 
         self.__image.select_color(2, self.__layers['faces_default']['layer'], color)
         self.__image.get_selection().invert(self.__image)
@@ -515,12 +607,16 @@ class Thumbnailer (Gimp.PlugIn):
         
         Gimp.context_set_line_width(100)
         self.__layers['head_border']['layer'].edit_stroke_selection()
-        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
-                                                        self.__image,
-                                                        self.__layers['head_border']['layer'],
-                                                        4.0,
-                                                        4.0,
-                                                        0])
+
+        procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+        config = procedure.create_config()
+        config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+        config.set_property('image', self.__image)
+        config.set_property('drawable', self.__layers['head_border']['layer'])
+        config.set_property('horizontal', 4.0)
+        config.set_property('vertical', 4.0)
+        config.set_property('method', 0)
+        procedure.run(config)
        
         Gimp.context_set_foreground(Thumbnailer._parseHex(params['fg_color']))  
         # Gimp.context_swap_colors()
@@ -534,12 +630,15 @@ class Thumbnailer (Gimp.PlugIn):
         self.__image.get_selection().invert(self.__image)
         self.__layers['border']['layer'].edit_fill(Gimp.FillType.BACKGROUND)
 
-        Gimp.get_pdb().run_procedure('plug-in-gauss', [ Gimp.RunMode.INTERACTIVE,
-                                                self.__image,
-                                                self.__layers['border']['layer'],
-                                                16.0,
-                                                16.0,
-                                                0])
+        procedure = Gimp.get_pdb().lookup_procedure('plug-in-gauss')
+        config = procedure.create_config()
+        config.set_property('run-mode', Gimp.RunMode.NONINTERACTIVE)
+        config.set_property('image', self.__image)
+        config.set_property('drawable', self.__layers['border']['layer'])
+        config.set_property('horizontal', 16.0)
+        config.set_property('vertical', 16.0)
+        config.set_property('method', 0)
+        procedure.run(config)
 
         self.__image.get_selection().none(self.__image)
 
@@ -576,10 +675,15 @@ class Thumbnailer (Gimp.PlugIn):
 
     @staticmethod
     def _parseHex(hex):
-        color = Gimp.RGB()
-        rgb = tuple(int(hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-        color.set(float(rgb[0])/255.0, float(rgb[1])/255.0, float(rgb[2])/255.0)
-        # print('Color: ('+str(color.r)+','+str(color.g)+','+str(color.b)+')')
+        color = Gegl.Color()
+        
+        if hex == "SHADOW":
+            color.set_rgba(0.0, 0.0, 0.0, 1.0)
+        else:
+            rgb = tuple(int(hex.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+            color.set_rgba(float(rgb[0])/255.0, float(rgb[1])/255.0, float(rgb[2])/255.0, 1.0)
+            # print('Color: ('+str(color.r)+','+str(color.g)+','+str(color.b)+')')
+
         return color
 
     def do_create_procedure(self, name):

@@ -16,7 +16,8 @@ Install Pip in your gimp's python instance
 
 Make sure that pip is working with your Gimp install...
 
-`PS C:\Program Files\GIMP 2\bin> ./python.exe -m pip install configparser`
+`.\python.exe -m pip install configparser`
+`.\python.exe -m pip install pygsheets`
 
 Step 1
 ---
@@ -47,4 +48,9 @@ tokenPath = <path_to>\credentials.json
 Step 3
 ---
 Restart gimp and thumbnailer should be available at the bottom of the Filters menu.
+
+## Sample Testing Commands
+>>> layer = Gimp.Image.get_layer_by_name(Gimp.list_images()[0], "episode_number")
+>>> Gimp.list_images()[0].select_contiguous_color(2, layer, 10, 10)
+
 
